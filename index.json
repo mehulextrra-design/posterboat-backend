@@ -1,0 +1,52 @@
+const express = require('express');
+const cors = require('cors');
+const { GoogleGenAI } = require('@google/genai');
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.post('/api/generate-video', async (request, response) => {
+  try {
+    const { prompt, image } = request.body;
+    if (!prompt) {
+      return response.status(400).json({ error: 'A text prompt is required.' });
+    }
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      throw new Error("API_KEY is not configured on the server.");
+    }
+    const ai = new GoogleGenAI({ apiKey });
+    const requestPayload = {
+      model: 'veo-3.1-fast-generate-preview',
+      prompt,
+      config: {
+        numberOfVideos: 1,
+        resolution: '720p',
+        aspectRatio: '9:16'
+      }
+    };
+    if (image && image.base64 && image.mimeType) {
+      requestPayload.image = {
+        imageBytes: image.base64,
+        mimeType: image.mimeType,
+      };
+    }
+    let operation = await ai.models.generateVideos(requestPayload);
+    while (!operation.done) {
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      operation = await ai.operations.getVideosOperation({ operation });
+    }
+    const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+    if (!downloadLink) {
+      throw new Error("Video generation succeeded but no download link was found.");
+    }
+    response.status(200).json({ videoUrl: downloadLink });
+  } catch (error) {
+    console.error('Error during video generation:', error);
+    response.status(500).json({ error: 'Failed to generate video.', details: error.message });
+  }
+});
+
+module.exports = app;
